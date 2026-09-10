@@ -1,0 +1,11 @@
+เริ่ม Deploy จากไฟล์นี้
+
+1) อ่าน DEPLOY_VERCEL_TH.md
+2) ดับเบิลคลิก 00_CHECK_BEFORE_DEPLOY.bat
+3) นำ Source นี้ขึ้น GitHub (ห้ามอัปโหลด .env.local)
+4) Import GitHub Repository เข้า Vercel
+5) ใส่ Environment Variables จาก .env.local เดิมใน Vercel Dashboard
+6) หลังได้ URL *.vercel.app ให้ตั้ง Supabase Authentication > URL Configuration
+7) Redeploy แล้วทดสอบ Login / Camera / Progress / Quiz / Export
+
+หมายเหตุ: แพ็กนี้ไม่มี Secret และไม่มี .env.local

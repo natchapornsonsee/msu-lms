@@ -1,0 +1,3 @@
+"use client";
+import {useRouter} from "next/navigation";
+export default function GlobalResetButton(){const router=useRouter();async function run(){const phrase=prompt('คำสั่งนี้จะเริ่มรอบใหม่ให้ผู้เรียนทุกคนในทุกคอร์ส\nพิมพ์ RESET ALL เพื่อยืนยัน');if(phrase!=='RESET ALL')return;const r=await fetch('/api/admin/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:'global'})});if(!r.ok){const j=await r.json();alert(j.error||'Reset ไม่สำเร็จ');return;}alert('สร้างรอบการเรียนใหม่ให้ทุก Enrollment แล้ว');router.refresh();}return <button className="btn btn-danger" onClick={run}>Reset ทุกคนทุกคอร์ส</button>}

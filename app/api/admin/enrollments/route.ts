@@ -1,0 +1,2 @@
+import {NextResponse} from "next/server"; import {requireAdmin} from "@/lib/auth";
+export async function POST(req:Request){try{const {admin}=await requireAdmin();const b=await req.json();const {error}=await admin.from("enrollments").upsert({user_id:b.user_id,course_id:b.course_id},{onConflict:"user_id,course_id"});if(error)throw error;return NextResponse.json({ok:true});}catch(e:any){return NextResponse.json({error:e.message},{status:500});}}
