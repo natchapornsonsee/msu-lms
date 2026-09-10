@@ -1,7 +1,7 @@
 "use client";
 import {useCallback,useEffect,useMemo,useRef,useState} from "react";
 import Link from "next/link";
-import {furthestContinuousSecond,mergeRanges,progressPercent} from "@/lib/progress";
+import {mergeRanges,progressPercent} from "@/lib/progress";
 import type {WatchedRange} from "@/lib/types";
 
 declare global { interface Window { YT:any; onYouTubeIframeAPIReady?:()=>void } }
@@ -9,6 +9,13 @@ declare global { interface Window { YT:any; onYouTubeIframeAPIReady?:()=>void } 
 type P={id:string,title:string,description:string,video_ref:string,order_no:number,progress:any};
 
 function loadYouTubeApi(){return new Promise<void>((resolve)=>{if(window.YT?.Player)return resolve();const existing=document.querySelector('script[src="https://www.youtube.com/iframe_api"]');const prev=window.onYouTubeIframeAPIReady;window.onYouTubeIframeAPIReady=()=>{prev?.();resolve();};if(!existing){const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);}})}
+
+function furthestWatchedSecond(ranges:WatchedRange[]){
+ return ranges.reduce((max,range)=>{
+  const end=Number(range?.[1]||0);
+  return Number.isFinite(end)?Math.max(max,end):max;
+ },0);
+}
 
 // Keep the JS package and WASM runtime on the same pinned version.
 // Using @latest here can load a different runtime than package-lock.json and cause
@@ -72,9 +79,54 @@ export default function LearningClient({course,parts,initialPartId}:{course:any,
  // This lets us distinguish a real manual seek from normal playback while
  // face detection is temporarily missing.
  const playbackSampleRef=useRef<Record<string,{videoTime:number,wallTime:number}>>({});
+ // Resume position is navigation state, separate from credited watched progress.
+ // This prevents small face-detection gaps from forcing Resume back to the first gap.
+ const lastPositionRef=useRef<Record<string,number>>(Object.fromEntries(parts.map(p=>[
+  p.id,
+  Number(p.progress?.last_position_seconds||0)
+ ])));
+ // Highest position reached by natural playback. Forward seeks beyond this are blocked,
+ // while seeking back inside an already reached area remains allowed.
+ const allowedForwardRef=useRef<Record<string,number>>(Object.fromEntries(parts.map(p=>[
+  p.id,
+  Math.max(
+   Number(p.progress?.last_position_seconds||0),
+   furthestWatchedSecond((p.progress?.watched_ranges||[]) as WatchedRange[])
+  )
+ ])));
  const [playerReady,setPlayerReady]=useState(false);const [message,setMessage]=useState('');
 
- const save=useCallback(async(partId:string,current:number)=>{const duration=durationRef.current[partId]||playerRef.current?.getDuration?.()||0;if(!duration)return;const body={part_id:partId,duration_seconds:duration,watched_ranges:rangesRef.current[partId]||[],last_position_seconds:current};try{const r=await fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(r.ok){const j=await r.json();rangesRef.current[partId]=j.watched_ranges||rangesRef.current[partId];setProgressByPart(x=>({...x,[partId]:Number(j.progress_pct||0)}));}}catch{}},[]);
+ const save=useCallback(async(partId:string,current:number,keepalive=false)=>{
+  const duration=durationRef.current[partId]||playerRef.current?.getDuration?.()||0;
+  if(!duration)return;
+  const safeCurrent=Math.max(0,Math.min(Number(current)||0,Number(duration)));
+  lastPositionRef.current[partId]=safeCurrent;
+  const body={
+   part_id:partId,
+   duration_seconds:duration,
+   watched_ranges:rangesRef.current[partId]||[],
+   last_position_seconds:safeCurrent
+  };
+  try{
+   const r=await fetch('/api/progress',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body),
+    keepalive
+   });
+   if(r.ok){
+    const j=await r.json();
+    rangesRef.current[partId]=j.watched_ranges||rangesRef.current[partId];
+    lastPositionRef.current[partId]=Number(j.last_position_seconds??safeCurrent);
+    allowedForwardRef.current[partId]=Math.max(
+     Number(allowedForwardRef.current[partId]||0),
+     Number(j.last_position_seconds??safeCurrent),
+     furthestWatchedSecond(rangesRef.current[partId]||[])
+    );
+    setProgressByPart(x=>({...x,[partId]:Number(j.progress_pct||0)}));
+   }
+  }catch{}
+ },[]);
 
  useEffect(()=>{
   let cancelled=false;
@@ -167,17 +219,61 @@ export default function LearningClient({course,parts,initialPartId}:{course:any,
   };
  },[]);
 
- useEffect(()=>{let dead=false;(async()=>{await loadYouTubeApi();if(dead)return;setPlayerReady(false);playerRef.current?.destroy?.();const holder=document.getElementById('yt-player');if(!holder)return;holder.innerHTML='';const div=document.createElement('div');div.id='yt-player-inner';holder.appendChild(div);playerRef.current=new window.YT.Player('yt-player-inner',{videoId:active.video_ref,playerVars:{playsinline:1,rel:0,origin:window.location.origin},events:{onReady:(e:any)=>{durationRef.current[active.id]=e.target.getDuration();const old=Math.max(Number(active.progress?.last_position_seconds||0),furthestContinuousSecond(rangesRef.current[active.id]||[]));if(old>1)e.target.seekTo(old,true);playbackSampleRef.current[active.id]={videoTime:old>1?old:0,wallTime:performance.now()};setPlayerReady(true);},onStateChange:()=>{}}});})();return()=>{dead=true;};},[active.id,active.video_ref]);
+ useEffect(()=>{let dead=false;(async()=>{await loadYouTubeApi();if(dead)return;setPlayerReady(false);playerRef.current?.destroy?.();const holder=document.getElementById('yt-player');if(!holder)return;holder.innerHTML='';const div=document.createElement('div');div.id='yt-player-inner';holder.appendChild(div);playerRef.current=new window.YT.Player('yt-player-inner',{videoId:active.video_ref,playerVars:{playsinline:1,rel:0,origin:window.location.origin},events:{onReady:(e:any)=>{
+   durationRef.current[active.id]=e.target.getDuration();
+   // Repair old records too: if progress ranges reached farther than the old
+   // last_position_seconds, resume from the farthest actually watched range.
+   const old=Math.max(
+    Number(lastPositionRef.current[active.id]||active.progress?.last_position_seconds||0),
+    furthestWatchedSecond(rangesRef.current[active.id]||[])
+   );
+   const duration=Number(e.target.getDuration?.()||0);
+   const resumeAt=duration?Math.min(old,Math.max(0,duration-1)):old;
+   lastPositionRef.current[active.id]=resumeAt;
+   allowedForwardRef.current[active.id]=Math.max(
+    Number(allowedForwardRef.current[active.id]||0),
+    resumeAt
+   );
+   if(resumeAt>1)e.target.seekTo(resumeAt,true);
+   playbackSampleRef.current[active.id]={videoTime:resumeAt>1?resumeAt:0,wallTime:performance.now()};
+   setPlayerReady(true);
+  },onStateChange:(e:any)=>{
+   // Persist immediately on pause/end so a long session is not dependent only
+   // on the periodic save timer.
+   if(e.data===0||e.data===2){
+    const t=Number(e.target?.getCurrentTime?.()||0);
+    void save(active.id,t,true);
+   }
+  }}});})();return()=>{dead=true;};},[active.id,active.video_ref,save]);
 
- useEffect(()=>{const onVis=()=>{if(document.hidden){const p=playerRef.current;if(p?.getPlayerState?.()===1)p.pauseVideo();const t=p?.getCurrentTime?.()||0;void save(activeRef.current,t);}};document.addEventListener('visibilitychange',onVis);return()=>document.removeEventListener('visibilitychange',onVis);},[save]);
+ useEffect(()=>{
+  const persistCurrent=()=>{
+   const p=playerRef.current;
+   const t=Number(p?.getCurrentTime?.()||lastPositionRef.current[activeRef.current]||0);
+   void save(activeRef.current,t,true);
+  };
+  const onVis=()=>{
+   if(document.hidden){
+    const p=playerRef.current;
+    if(p?.getPlayerState?.()===1)p.pauseVideo();
+    persistCurrent();
+   }
+  };
+  const onPageHide=()=>persistCurrent();
+  document.addEventListener('visibilitychange',onVis);
+  window.addEventListener('pagehide',onPageHide);
+  return()=>{
+   document.removeEventListener('visibilitychange',onVis);
+   window.removeEventListener('pagehide',onPageHide);
+  };
+ },[save]);
 
- useEffect(()=>{const timer=setInterval(()=>{const p=playerRef.current;if(!p||!playerReady)return;const partId=activeRef.current;const current=Number(p.getCurrentTime?.()||0);const duration=Number(p.getDuration?.()||0);if(duration)durationRef.current[partId]=duration;const ranges=rangesRef.current[partId]||[];const maxAllowed=furthestContinuousSecond(ranges);
+ useEffect(()=>{const timer=setInterval(()=>{const p=playerRef.current;if(!p||!playerReady)return;const partId=activeRef.current;const current=Number(p.getCurrentTime?.()||0);const duration=Number(p.getDuration?.()||0);if(duration)durationRef.current[partId]=duration;const ranges=rangesRef.current[partId]||[];
 
-  // IMPORTANT: Do not compare current playback time directly with maxAllowed.
-  // maxAllowed intentionally stops advancing whenever the face is temporarily
-  // not detected, while YouTube may continue playing for up to 10 seconds.
-  // The old guard therefore rewound normal playback every ~7-10 seconds.
-  // Instead, block only an implausibly large forward jump (a real seek).
+  // Detect a genuine manual forward jump from playback movement itself.
+  // Resume position / allowed forward position is deliberately independent
+  // from credited progress, because credited progress can contain small gaps
+  // when face detection is temporarily lost.
   const now=performance.now();
   const previous=playbackSampleRef.current[partId];
   const playbackRate=Math.max(0.25,Number(p.getPlaybackRate?.()||1));
@@ -186,13 +282,26 @@ export default function LearningClient({course,parts,initialPartId}:{course:any,
   const naturalAdvanceAllowance=(wallElapsed*playbackRate)+2.5;
   const looksLikeManualForwardSeek=Boolean(previous)&&videoAdvance>Math.max(4,naturalAdvanceAllowance);
 
-  if(looksLikeManualForwardSeek&&current>maxAllowed+7){
-   p.seekTo(maxAllowed,true);
-   playbackSampleRef.current[partId]={videoTime:maxAllowed,wallTime:now};
+  const allowedForward=Math.max(
+   Number(allowedForwardRef.current[partId]||0),
+   furthestWatchedSecond(ranges)
+  );
+
+  if(looksLikeManualForwardSeek&&current>allowedForward+7){
+   p.seekTo(allowedForward,true);
+   playbackSampleRef.current[partId]={videoTime:allowedForward,wallTime:now};
+   lastPositionRef.current[partId]=allowedForward;
    setMessage('ยังไม่สามารถลากข้ามช่วงที่ไม่เคยเรียนได้');
    return;
   }
 
+  // Natural playback advances the resume/seek ceiling even during a short
+  // face-detection gap. Those seconds are NOT credited to Progress unless
+  // facePresent is true below.
+  if(!looksLikeManualForwardSeek){
+   allowedForwardRef.current[partId]=Math.max(allowedForward,current);
+  }
+  lastPositionRef.current[partId]=current;
   playbackSampleRef.current[partId]={videoTime:current,wallTime:now};
   const playing=p.getPlayerState?.()===1;if(playing&&document.visibilityState==='visible'&&facePresentRef.current&&cameraState==='ready'){const next=mergeRanges([...ranges,[Math.max(0,current-1.4),current]]);rangesRef.current[partId]=next;setProgressByPart(x=>({...x,[partId]:progressPercent(next,duration)}));lastSaveRef.current+=1;if(lastSaveRef.current>=7){lastSaveRef.current=0;void save(partId,current);}}},1000);return()=>clearInterval(timer);},[playerReady,cameraState,parts,save]);
 
