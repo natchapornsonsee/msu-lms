@@ -7,3 +7,9 @@ node_modules
 .DS_Store
 npm-debug.log*
 *.zip
+recovery-codes.txt
+*.bak_v0_*
+MSU_LMS_*_FIX_*/
+recovery-codes.txt
+*.bak_v0_*
+MSU_LMS_*_FIX_*/
