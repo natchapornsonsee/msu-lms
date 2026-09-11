@@ -54,9 +54,29 @@ export async function POST(req:Request){
 
   const previous=normalizeRanges(existing?.watched_ranges);
   const incoming=normalizeRanges(b.watched_ranges);
-  const ranges=mergeRanges([...previous,...incoming]);
+  let ranges=mergeRanges([...previous,...incoming]);
 
-  const pct=progressPercent(ranges,duration);
+ const requestedRaw = Number(b.last_position_seconds);
+const requested = Number.isFinite(requestedRaw)
+  ? requestedRaw
+  : Number(existing?.last_position_seconds || 0);
+
+const furthestWatched = ranges.reduce(
+  (max, range) => Math.max(max, Number(range?.[1] || 0)),
+  0
+);
+
+const reachedActualEnd =
+  requested >= duration - 2 &&
+  furthestWatched >= duration - 12;
+
+if (reachedActualEnd) {
+  ranges = [[0, duration]];
+}
+
+const pct = reachedActualEnd
+  ? 100
+  : progressPercent(ranges, duration);
   const passed=pct>=Number(course?.passing_progress||80);
   const passedAt=passed?(existing?.passed_at||new Date().toISOString()):null;
 

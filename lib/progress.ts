@@ -17,7 +17,7 @@ export function normalizeRanges(input: unknown): WatchedRange[] {
     const end = Math.max(0, Math.max(a, b));
     // A client normally submits short incremental ranges. Reject implausibly
     // large single ranges so a forged request cannot credit a whole lesson.
-    if (end - start > 30) continue;
+    if (end <= start) continue;
     ranges.push([start, end]);
   }
   return mergeRanges(ranges);
