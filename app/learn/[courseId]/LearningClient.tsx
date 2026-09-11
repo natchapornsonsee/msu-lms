@@ -295,9 +295,10 @@ export default function LearningClient({course,parts,initialPartId}:{course:any,
    return;
   }
 
-  // Natural playback advances the resume/seek ceiling even during a short
-  // face-detection gap. Those seconds are NOT credited to Progress unless
-  // facePresent is true below.
+  // Natural playback advances the resume/seek ceiling during a short
+  // face-detection gap. Raw samples are added only when a face is detected;
+  // lib/progress.ts bridges detector drop-outs shorter than the same 10-second
+  // threshold used by the auto-pause policy.
   if(!looksLikeManualForwardSeek){
    allowedForwardRef.current[partId]=Math.max(allowedForward,current);
   }
@@ -310,7 +311,7 @@ export default function LearningClient({course,parts,initialPartId}:{course:any,
  const overall=Math.round(parts.reduce((s,p)=>s+(progressByPart[p.id]||0),0)/parts.length);
  return <div className="learn-layout">
   <section className="card panel"><div className="space"><div><div className="eyebrow">PART {active.order_no}</div><h3>{active.title}</h3></div><span className="badge good">{Math.round(progressByPart[active.id]||0)}%</span></div><p className="muted">{active.description}</p><div className="video-wrap"><div id="yt-player" style={{width:'100%',height:'100%'}}/></div>
-   <div className="presence"><span className={`dot ${facePresent?'on':''}`}/><div><strong>{cameraState==='denied'?'กล้องไม่พร้อม':facePresent?'ตรวจพบผู้เรียน':'กำลังตรวจสอบผู้เรียน'}</strong><div className="muted small">{facePresent?'Progress กำลังถูกนับ':'Progress จะไม่เพิ่มเมื่อไม่พบใบหน้า'}{missingSeconds>0?` · ไม่พบ ${missingSeconds}s`:''}</div></div></div>
+   <div className="presence"><span className={`dot ${facePresent?'on':''}`}/><div><strong>{cameraState==='denied'?'กล้องไม่พร้อม':facePresent?'ตรวจพบผู้เรียน':'กำลังตรวจสอบผู้เรียน'}</strong><div className="muted small">{facePresent?'Progress กำลังถูกนับ':'กำลังตรวจสอบ · หากไม่พบต่อเนื่อง 10 วินาที ระบบจะหยุด'}{missingSeconds>0?` · ไม่พบ ${missingSeconds}s`:''}</div></div></div>
    {message&&<div className="alert">{message}</div>}
    <div className="space"><div style={{flex:1}}><div className="progress-track"><div className="progress-fill" style={{width:`${overall}%`}}/></div><div className="progress-meta"><span>Course progress</span><b>{overall}%</b></div></div>{unlocked?<Link className="btn" href={`/quiz/${course.id}`}>ทำ Post-test →</Link>:<span className="badge warn">เรียนทุก Part ≥ {course.passing_progress}% เพื่อปลดล็อกข้อสอบ</span>}</div>
   </section>
