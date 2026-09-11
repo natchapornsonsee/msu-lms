@@ -25,6 +25,7 @@ create table if not exists public.courses (
   title text not null,
   description text not null default '',
   passing_progress numeric(5,2) not null default 80,
+  post_test_url text,
   quiz_pass_score numeric(5,2) not null default 60,
   is_published boolean not null default false,
   created_by uuid references public.profiles(id),

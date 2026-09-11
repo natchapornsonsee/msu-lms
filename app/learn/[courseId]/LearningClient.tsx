@@ -1,6 +1,5 @@
 "use client";
 import {useCallback,useEffect,useMemo,useRef,useState} from "react";
-import Link from "next/link";
 import {mergeRanges,progressPercent} from "@/lib/progress";
 import type {WatchedRange} from "@/lib/types";
 
@@ -308,12 +307,13 @@ export default function LearningClient({course,parts,initialPartId}:{course:any,
 
  function switchPart(id:string){const old=activeRef.current;const t=playerRef.current?.getCurrentTime?.()||0;void save(old,t);setActiveId(id);setMessage('');}
  const unlocked=useMemo(()=>parts.every(p=>(progressByPart[p.id]||0)>=Number(course.passing_progress)),[parts,progressByPart,course.passing_progress]);
+ const postTestUrl=String(course.post_test_url||'').trim();
  const overall=Math.round(parts.reduce((s,p)=>s+(progressByPart[p.id]||0),0)/parts.length);
  return <div className="learn-layout">
   <section className="card panel"><div className="space"><div><div className="eyebrow">PART {active.order_no}</div><h3>{active.title}</h3></div><span className="badge good">{Math.round(progressByPart[active.id]||0)}%</span></div><p className="muted">{active.description}</p><div className="video-wrap"><div id="yt-player" style={{width:'100%',height:'100%'}}/></div>
    <div className="presence"><span className={`dot ${facePresent?'on':''}`}/><div><strong>{cameraState==='denied'?'กล้องไม่พร้อม':facePresent?'ตรวจพบผู้เรียน':'กำลังตรวจสอบผู้เรียน'}</strong><div className="muted small">{facePresent?'Progress กำลังถูกนับ':'กำลังตรวจสอบ · หากไม่พบต่อเนื่อง 10 วินาที ระบบจะหยุด'}{missingSeconds>0?` · ไม่พบ ${missingSeconds}s`:''}</div></div></div>
    {message&&<div className="alert">{message}</div>}
-   <div className="space"><div style={{flex:1}}><div className="progress-track"><div className="progress-fill" style={{width:`${overall}%`}}/></div><div className="progress-meta"><span>Course progress</span><b>{overall}%</b></div></div>{unlocked?<Link className="btn" href={`/quiz/${course.id}`}>ทำ Post-test →</Link>:<span className="badge warn">เรียนทุก Part ≥ {course.passing_progress}% เพื่อปลดล็อกข้อสอบ</span>}</div>
+   <div className="space"><div style={{flex:1}}><div className="progress-track"><div className="progress-fill" style={{width:`${overall}%`}}/></div><div className="progress-meta"><span>Course progress</span><b>{overall}%</b></div></div>{unlocked?(postTestUrl?<a className="btn" href={postTestUrl} target="_blank" rel="noopener noreferrer">ทำ Post-Test →</a>:<span className="badge warn">Post-Test ยังไม่พร้อม · ผู้สอนยังไม่ได้แนบลิงก์</span>):<span className="badge warn">เรียนทุก Part ≥ {course.passing_progress}% เพื่อปลดล็อก Post-Test</span>}</div>
   </section>
   <aside className="card panel sticky"><div className="eyebrow">PRESENCE CHECK</div><h3>กล้องผู้เรียน</h3><div className="camera-mini"><video ref={cameraRef} muted playsInline/><div className="camera-label">ON-DEVICE · ไม่บันทึกภาพ</div></div><div className="divider"/><h3>เนื้อหาในคอร์ส</h3><div className="part-list">{parts.map(p=><button key={p.id} className={`part-item ${p.id===active.id?'active':''}`} onClick={()=>switchPart(p.id)} style={{color:'inherit',textAlign:'left',width:'100%'}}><strong>{p.order_no}. {p.title}</strong><div className="progress-track"><div className="progress-fill" style={{width:`${progressByPart[p.id]||0}%`}}/></div><div className="progress-meta"><span>{(progressByPart[p.id]||0)>=Number(course.passing_progress)?'ผ่าน':'กำลังเรียน'}</span><b>{Math.round(progressByPart[p.id]||0)}%</b></div></button>)}</div></aside>
  </div>

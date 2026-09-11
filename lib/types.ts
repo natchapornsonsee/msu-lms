@@ -20,6 +20,7 @@ export type Course = {
   title: string;
   description: string;
   passing_progress: number;
+  post_test_url?: string | null;
   quiz_pass_score: number;
   is_published: boolean;
 };
